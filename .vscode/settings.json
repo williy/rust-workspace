@@ -1,0 +1,12 @@
+{
+  // このワークスペースでのみ rust-analyzer を有効にするためのヒント
+  "rust-analyzer.linkedProjects": [
+    "Cargo.toml"
+  ],
+  // 保存時に自動でフォーマット（整形）をかける設定
+  "editor.formatOnSave": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.semanticHighlighting.enabled": true
+  }
+}
