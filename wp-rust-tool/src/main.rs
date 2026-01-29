@@ -16,16 +16,8 @@ struct WpDbConfig {
 fn main() {
     let path = "wp-config.php";
 
-    // 1. ファイル読み込み
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => {
-            println!("Error: {} が見つかりません。", path);
-            return;
-        }
-    };
-
-    // 2. 正規表現で抽出
+    // --- 1. 抽出 (Extraction) ---
+    let content = fs::read_to_string(path).expect("wp-config.php が読み込めません");
     let re = Regex::new(r#"(?i)define\s*\(\s*['"](.+?)['"]\s*,\s*['"](.+?)['"]\s*\);"#).unwrap();
     let mut config = WpDbConfig::default();
 
@@ -38,36 +30,44 @@ fn main() {
         }
     }
 
-    // 3. 抽出結果の処理
-    if config.db_name.is_empty() {
-        println!("設定が見つかりませんでした。");
-        return;
-    }
-
     println!("--- WordPress Configuration Extracted ---");
     println!("Database: {}", config.db_name);
     println!("User    : {}", config.db_user);
 
-    // 4. パスワードの暗号化保存（B-Sheet B-201/202 に基づく実装）
+    // --- 2. 暗号化 (Encryption) ---
+    // ※ B-Sheet B-301: 本来は環境変数に逃がすべき「聖域」の鍵
+    let key_data = b"an example very very secret key.";
+    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(key_data);
+    let cipher = Aes256Gcm::new(key);
+
     if !config.db_password.is_empty() {
-        // 32バイトの固定鍵 (B-301: 将来的に環境変数化予定)
-        let key_data = b"an example very very secret key.";
-        let key = aes_gcm::Key::<Aes256Gcm>::from_slice(key_data);
-        let cipher = Aes256Gcm::new(key);
-
-        // ユニークなナンス（12バイト）の生成
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-
-        // 暗号化
         let ciphertext = cipher
             .encrypt(&nonce, config.db_password.as_bytes())
             .expect("Encryption failed");
 
-        // ファイル保存 (Nonce + Ciphertext)
         let mut file = File::create("db_pass.enc").expect("Failed to create enc file");
         file.write_all(&nonce).unwrap();
         file.write_all(&ciphertext).unwrap();
-
         println!("Password: [ENCRYPTED AND SAVED TO db_pass.enc]");
+    }
+
+    // --- 3. 復号化 (Decryption / Verification) ---
+    println!("\n--- Decryption Test (Phase 3) ---");
+    let enc_data = fs::read("db_pass.enc").expect("Failed to read enc file");
+
+    // B-202 の設計通り、先頭 12 バイト（ナンス）と本体（暗号文）を切り分ける
+    let (nonce_part, encrypted_part) = enc_data.split_at(12);
+    let nonce = aes_gcm::Nonce::from_slice(nonce_part);
+
+    match cipher.decrypt(nonce, encrypted_part) {
+        Ok(decrypted_bytes) => {
+            let password_str = String::from_utf8(decrypted_bytes).expect("Invalid UTF-8");
+            println!("🔓 Decrypted Password: {}", password_str);
+            println!("✅ 資産の可逆性を確認しました。道理は通りました。");
+        }
+        Err(_) => {
+            println!("❌ 復号失敗。データが改ざんされているか、鍵が一致しません。");
+        }
     }
 }
